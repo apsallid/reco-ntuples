@@ -23,7 +23,7 @@
 #include "SimDataFormats/GeneratorProducts/interface/HepMCProduct.h"
 #include "SimDataFormats/TrackingAnalysis/interface/TrackingParticle.h"
 #include "SimDataFormats/TrackingAnalysis/interface/TrackingVertex.h"
-
+#include "SimDataFormats/PileupSummaryInfo/interface/PileupSummaryInfo.h"
 #include "DataFormats/Math/interface/deltaPhi.h"
 // track data formats
 #include "DataFormats/TrackReco/interface/Track.h"
@@ -57,6 +57,8 @@
 
 #include "FWCore/Framework/interface/ConsumesCollector.h"
 #include "EgammaTools/EgammaAnalysis/interface/ElectronIDHelper.h"
+#include "EgammaTools/EgammaAnalysis/interface/ElectronBDTHelper.h"
+
 
 #include <map>
 #include <set>
@@ -175,6 +177,7 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   void clearVariables();
 
   void retrieveLayerPositions(const edm::EventSetup &, unsigned layers);
+  float puDensity(float z, int npu, float z0,float sigmaz) const ;
 
   void computeWidth(const reco::HGCalMultiCluster &cluster, math::XYZPoint &bar,
 		    math::XYZVector &axis, float &sigu, float &sigv, float &sigp, float &sige,
@@ -185,6 +188,11 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
 
   // ---------parameters ----------------------------
   bool readCaloParticles_;
+  bool readGen_;
+  edm::InputTag genPartInputTag_;
+  edm::InputTag bsInputTag_;
+  edm::InputTag puSummary_;
+  edm::InputTag electronTag_;
   bool storeMoreGenInfo_;
   bool storeGenParticleExtrapolation_;
   bool storePCAvariables_;
@@ -196,6 +204,7 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   std::string detector_;
   bool rawRecHits_;
 
+
   // ----------member data ---------------------------
 
     /*
@@ -206,6 +215,8 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
     */
   edm::EDGetTokenT<std::vector<TrackingVertex>> vtx_;
   edm::EDGetTokenT<std::vector<TrackingParticle>> part_;
+  edm::EDGetTokenT<std::vector<reco::GenParticle> > genParticles_;
+
     /*
   edm::EDGetTokenT<std::vector<SimCluster>> simClusters_;
   edm::EDGetTokenT<std::vector<reco::PFCluster>> pfClusters_;
@@ -222,9 +233,12 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   edm::EDGetTokenT<std::vector<reco::GsfElectron>> electrons_;
     //edm::EDGetTokenT<edm::ValueMap<reco::CaloClusterPtr>> electrons_ValueMapClusters_;
   edm::EDGetTokenT<std::vector<reco::Vertex>> vertices_;
+  edm::EDGetTokenT<std::vector<PileupSummaryInfo>> puSummaryInfo_;
+  edm::EDGetTokenT<reco::BeamSpot> beamSpot_;
 
-  // Ele ID helper
+  // Ele ID helpers
   ElectronIDHelper * eIDHelper_;
+  ElectronBDTHelper * bdtHelper_;
 
   TTree *t_;
 
@@ -237,7 +251,14 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   float vtx_x_;
   float vtx_y_;
   float vtx_z_;
-    int n_vtx_;
+  int n_vtx_;
+  int npu_;
+  int rpu_;
+  float z_bs_;
+  float sigmaz_bs_;
+  float pu_density_;
+  float rpu_density_;
+
 
   ////////////////////
   // GenParticles
@@ -266,6 +287,17 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   std::vector<std::vector<float>> genpart_posy_;
   std::vector<std::vector<float>> genpart_posz_;
 
+  ////////////////////
+  // reco::GenParticles
+  //
+  std::vector<float> gen_eta_;
+  std::vector<float> gen_phi_;
+  std::vector<float> gen_pt_;
+  std::vector<float> gen_energy_;
+  std::vector<int> gen_charge_;
+  std::vector<int> gen_pdgid_;
+  std::vector<int> gen_status_;
+  std::vector<std::vector<int>> gen_daughters_;
     /*
   ////////////////////
   // RecHits
@@ -396,6 +428,7 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   std::vector<float> ecalDrivenGsfele_seedeta_;
   std::vector<float> ecalDrivenGsfele_seedphi_;
   std::vector<float> ecalDrivenGsfele_seedenergy_;
+  std::vector<float> ecalDrivenGsfele_eleenergy_;
   std::vector<float> ecalDrivenGsfele_energy_;
   std::vector<float> ecalDrivenGsfele_energyEE_;
   std::vector<float> ecalDrivenGsfele_energyFH_;
@@ -412,6 +445,7 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   std::vector<float> ecalDrivenGsfele_track_gsfChi2_;
   std::vector<float> ecalDrivenGsfele_track_kfChi2_;
   std::vector<float> ecalDrivenGsfele_track_kfNhits_;
+  std::vector<float> ecalDrivenGsfele_track_gsfNhits_;
 
   std::vector<float> ecalDrivenGsfele_deltaEtaSuperClusterTrackAtVtx_;
   std::vector<float> ecalDrivenGsfele_deltaPhiSuperClusterTrackAtVtx_;
@@ -461,6 +495,16 @@ class HGCalAnalysis_EleID : public edm::one::EDAnalyzer<edm::one::WatchRuns, edm
   std::vector<float> ecalDrivenGsfele_realDepth_;
   std::vector<float> ecalDrivenGsfele_depthCompat_;
   std::vector<float> ecalDrivenGsfele_predDepthSigma_;
+
+  std::vector<float> ecalDrivenGsfele_isoring1_;
+  std::vector<float> ecalDrivenGsfele_isoring2_;
+  std::vector<float> ecalDrivenGsfele_isoring3_;
+  std::vector<float> ecalDrivenGsfele_isoring4_;
+  std::vector<float> ecalDrivenGsfele_isoring5_;
+  std::vector<float> ecalDrivenGsfele_isoring6_;
+  std::vector<float> ecalDrivenGsfele_isoring7_;
+
+  std::vector<float> ecalDrivenGsfele_bdt_;
 
     /*
   ////////////////////
@@ -519,6 +563,11 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID() { ; }
 
 HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
     : readCaloParticles_(iConfig.getParameter<bool>("readCaloParticles")),
+      readGen_(iConfig.getParameter<bool>("readGenParticles")),
+      genPartInputTag_(iConfig.existsAs<edm::InputTag>("GenParticles") ? iConfig.getParameter<edm::InputTag>("GenParticles"): edm::InputTag("genParticles")),
+      bsInputTag_(iConfig.existsAs<edm::InputTag>("BeamSpot")? iConfig.getParameter<edm::InputTag>("BeamSpot"): edm::InputTag("offlineBeamSpot")),
+      puSummary_(iConfig.existsAs<edm::InputTag>("PUSummary")? iConfig.getParameter<edm::InputTag>("PUSummary"): edm::InputTag("addPileupInfo")),
+      electronTag_(iConfig.existsAs<edm::InputTag>("GsfElectrons")? iConfig.getParameter<edm::InputTag>("GsfElectrons"): edm::InputTag("ecalDrivenGsfElectronsFromMultiCl")),
       storeMoreGenInfo_(iConfig.getParameter<bool>("storeGenParticleOrigin")),
       storeGenParticleExtrapolation_(iConfig.getParameter<bool>("storeGenParticleExtrapolation")),
       storePCAvariables_(iConfig.getParameter<bool>("storePCAvariables")),
@@ -541,10 +590,16 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
   hev_ = consumes<edm::HepMCProduct>(edm::InputTag("generatorSmeared"));
 
   vertices_ = consumes<std::vector<reco::Vertex>>(edm::InputTag("offlinePrimaryVertices"));
-
+  puSummaryInfo_ = consumes<std::vector<PileupSummaryInfo> > (puSummary_);
+  beamSpot_ = consumes<reco::BeamSpot>(bsInputTag_);
   eIDHelper_ = new ElectronIDHelper(iConfig , consumesCollector());
+  bdtHelper_ = new ElectronBDTHelper(iConfig ,consumesCollector());
+
   electrons_ =
-      consumes<std::vector<reco::GsfElectron>>(edm::InputTag("ecalDrivenGsfElectronsFromMultiCl"));
+      consumes<std::vector<reco::GsfElectron>>(electronTag_);
+  if (readGen_) {
+      genParticles_ = consumes<std::vector<reco::GenParticle>>(genPartInputTag_);
+    }
       //consumes<std::vector<reco::GsfElectron>>(edm::InputTag("ecalDrivenGsfElectrons"));
 
   /*
@@ -567,6 +622,7 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
   if (readCaloParticles_) {
     caloParticles_ = consumes<std::vector<CaloParticle>>(edm::InputTag("mix", "MergedCaloTruth"));
   }
+
   pfClusters_ = consumes<std::vector<reco::PFCluster>>(edm::InputTag("particleFlowClusterHGCal"));
   pfClustersFromMultiCl_ =
       consumes<std::vector<reco::PFCluster>>(edm::InputTag("particleFlowClusterHGCalFromMultiCl"));
@@ -577,6 +633,8 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
       consumes<std::vector<reco::HGCalMultiCluster>>(edm::InputTag("hgcalLayerClusters"));
   tracks_ = consumes<std::vector<reco::Track>>(edm::InputTag("generalTracks"));
   */
+
+
 
   usesResource(TFileService::kSharedResource);
   edm::Service<TFileService> fs;
@@ -592,6 +650,12 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
   t_->Branch("vtx_x", &vtx_x_);
   t_->Branch("vtx_y", &vtx_y_);
   t_->Branch("vtx_z", &vtx_z_);
+  t_->Branch("nominalpu",& npu_);
+  t_->Branch("realpu",& rpu_);
+  t_->Branch("z_bs", &z_bs_);
+  t_->Branch("sigmaz_bs", &sigmaz_bs_);
+  t_->Branch("pu_density",&pu_density_);
+  t_->Branch("truepu_density",&rpu_density_);
 
   t_->Branch("genpart_eta", &genpart_eta_);
   t_->Branch("genpart_phi", &genpart_phi_);
@@ -620,7 +684,16 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
   t_->Branch("genpart_posx", &genpart_posx_);
   t_->Branch("genpart_posy", &genpart_posy_);
   t_->Branch("genpart_posz", &genpart_posz_);
-
+  if (readGen_) {
+    t_->Branch("gen_eta", &gen_eta_);
+    t_->Branch("gen_phi", &gen_phi_);
+    t_->Branch("gen_pt", &gen_pt_);
+    t_->Branch("gen_energy", &gen_energy_);
+    t_->Branch("gen_charge", &gen_charge_);
+    t_->Branch("gen_pdgid", &gen_pdgid_);
+    t_->Branch("gen_status", &gen_status_);
+    t_->Branch("gen_daughters", &gen_daughters_);
+  }
   /*
   ////////////////////
   // RecHits
@@ -753,6 +826,7 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
     t_->Branch("ecalDrivenGsfele_seedeta", &ecalDrivenGsfele_seedeta_);
     t_->Branch("ecalDrivenGsfele_seedphi", &ecalDrivenGsfele_seedphi_);
     t_->Branch("ecalDrivenGsfele_seedenergy", &ecalDrivenGsfele_seedenergy_);
+    t_->Branch("ecalDrivenGsfele_eleenergy", &ecalDrivenGsfele_eleenergy_);
     t_->Branch("ecalDrivenGsfele_energy", &ecalDrivenGsfele_energy_);
     t_->Branch("ecalDrivenGsfele_energyEE", &ecalDrivenGsfele_energyEE_);
     t_->Branch("ecalDrivenGsfele_energyFH", &ecalDrivenGsfele_energyFH_);
@@ -787,6 +861,7 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
     t_->Branch("ecalDrivenGsfele_track_gsfChi2", &ecalDrivenGsfele_track_gsfChi2_);
     t_->Branch("ecalDrivenGsfele_track_kfChi2", &ecalDrivenGsfele_track_kfChi2_);
     t_->Branch("ecalDrivenGsfele_track_kfNhits", &ecalDrivenGsfele_track_kfNhits_);
+    t_->Branch("ecalDrivenGsfele_track_gsfNhits", &ecalDrivenGsfele_track_gsfNhits_);
 
     // electron (seed) variables
     t_->Branch("ecalDrivenGsfele_ele_siguu", &ecalDrivenGsfele_ele_siguu_);
@@ -823,7 +898,17 @@ HGCalAnalysis_EleID::HGCalAnalysis_EleID(const edm::ParameterSet &iConfig)
     t_->Branch("ecalDrivenGsfele_ele_depthCompat", &ecalDrivenGsfele_depthCompat_);
     t_->Branch("ecalDrivenGsfele_ele_predDepthSigma", &ecalDrivenGsfele_predDepthSigma_);
 
+    t_->Branch("ecalDrivenGsfele_ele_isoring1", &ecalDrivenGsfele_isoring1_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring2", &ecalDrivenGsfele_isoring2_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring3", &ecalDrivenGsfele_isoring3_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring4", &ecalDrivenGsfele_isoring4_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring5", &ecalDrivenGsfele_isoring5_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring6", &ecalDrivenGsfele_isoring6_);
+    t_->Branch("ecalDrivenGsfele_ele_isoring7", &ecalDrivenGsfele_isoring7_);
+    t_->Branch("ecalDrivenGsfele_bdt", &ecalDrivenGsfele_bdt_);
+
   }
+
 
   /*
   ////////////////////
@@ -893,6 +978,18 @@ void HGCalAnalysis_EleID::clearVariables() {
   genpart_posx_.clear();
   genpart_posy_.clear();
   genpart_posz_.clear();
+
+  ////////////////////
+  // reco::GenParticles
+  //
+  gen_eta_.clear();
+  gen_phi_.clear();
+  gen_pt_.clear();
+  gen_energy_.clear();
+  gen_charge_.clear();
+  gen_pdgid_.clear();
+  gen_status_.clear();
+  gen_daughters_.clear();
 
   /*
   ////////////////////
@@ -1023,6 +1120,7 @@ void HGCalAnalysis_EleID::clearVariables() {
   ecalDrivenGsfele_seedeta_.clear();
   ecalDrivenGsfele_seedphi_.clear();
   ecalDrivenGsfele_seedenergy_.clear();
+  ecalDrivenGsfele_eleenergy_.clear();
   ecalDrivenGsfele_energy_.clear();
   ecalDrivenGsfele_energyEE_.clear();
   ecalDrivenGsfele_energyFH_.clear();
@@ -1051,6 +1149,7 @@ void HGCalAnalysis_EleID::clearVariables() {
   ecalDrivenGsfele_track_gsfChi2_.clear();
   ecalDrivenGsfele_track_kfChi2_.clear();
   ecalDrivenGsfele_track_kfNhits_.clear();
+  ecalDrivenGsfele_track_gsfNhits_.clear();
 
   ecalDrivenGsfele_ele_pcaEigVal1_.clear();
   ecalDrivenGsfele_ele_pcaEigVal2_.clear();
@@ -1085,6 +1184,15 @@ void HGCalAnalysis_EleID::clearVariables() {
   ecalDrivenGsfele_depthCompat_.clear();
   ecalDrivenGsfele_predDepthSigma_.clear();
 
+  ecalDrivenGsfele_isoring1_.clear();
+  ecalDrivenGsfele_isoring2_.clear();
+  ecalDrivenGsfele_isoring3_.clear();
+  ecalDrivenGsfele_isoring4_.clear();
+  ecalDrivenGsfele_isoring5_.clear();
+  ecalDrivenGsfele_isoring6_.clear();
+  ecalDrivenGsfele_isoring7_.clear();
+
+  ecalDrivenGsfele_bdt_.clear();
   /*
   ////////////////////
   // calo particles
@@ -1141,6 +1249,15 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
   iEvent.getByToken(electrons_, eleHandle);
   const std::vector<reco::GsfElectron> &electrons = *eleHandle;
 
+//  Handle<std::vector<reco::Vertex>> vtxHandle;
+//  iEvent.getByToken(vertices_,vtxHandle);
+
+  Handle<std::vector<PileupSummaryInfo>>  puSIHandle;
+  iEvent.getByToken(puSummaryInfo_,puSIHandle);
+
+  Handle<reco::BeamSpot> bsHandle;
+  iEvent.getByToken(beamSpot_,bsHandle);
+
   /*
   Handle<std::vector<SimCluster>> simClusterHandle;
   Handle<std::vector<reco::PFCluster>> pfClusterHandle;
@@ -1189,17 +1306,30 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
   vz_ = primaryVertex->position().z() / 10.;
   Point sim_pv(vx, vy, vz_);
 
+  auto const & pusi = *puSIHandle;
+  unsigned npsi=pusi.size();
+  for (unsigned ipsi=0; ipsi<npsi ;++ ipsi) {
+      if (pusi[ipsi].getBunchCrossing()==0) {
+          npu_ = pusi[ipsi].getTrueNumInteractions();
+          rpu_ = pusi[ipsi].getPU_NumInteractions();
+          break;
+      }
+  }
+
+  auto const & beamspot = *bsHandle;
+  // according to Josh, z0 and sigma is in mm
+  z_bs_ = beamspot.z0()*10.;
+  sigmaz_bs_ = beamspot.sigmaZ()*10.;
+  pu_density_ = puDensity(10.*vertices[0].z(), npu_, z_bs_, sigmaz_bs_);
+  rpu_density_ = puDensity(10.*vz_, rpu_, z_bs_, sigmaz_bs_);
   HGCal_helpers_EleID::simpleTrackPropagator toHGCalPropagator(aField_);
   toHGCalPropagator.setPropagationTargetZ(layerPositions_[0]);
   std::vector<FSimTrack *> allselectedgentracks;
   unsigned int npart = mySimEvent_->nTracks();
-  for (unsigned int i = 0; i < npart; ++i) {
+    for (unsigned int i = 0; i < npart; ++i) {
     std::vector<float> xp, yp, zp;
     FSimTrack &myTrack(mySimEvent_->track(i));
     math::XYZTLorentzVectorD vtx(0, 0, 0, 0);
-
-    // Skip particles with myTrack.genpartIndex != 1,2
-    if ( myTrack.genpartIndex() > 2 || myTrack.genpartIndex() < 0 ) continue;
 
     int reachedEE = 0;  // compute the extrapolations for the particles reaching EE
 			// and for the gen particles
@@ -1290,6 +1420,26 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
       if (!trackj->noMother()) {
 	if (&trackj->mother() == tracki) genpart_mother_.at(j) = i;
       }
+    }
+  }
+  if (readGen_) {
+    Handle<std::vector<reco::GenParticle>> genParticlesHandle;
+    iEvent.getByToken(genParticles_, genParticlesHandle);
+    for (std::vector<reco::GenParticle>::const_iterator it_p = genParticlesHandle->begin();
+         it_p != genParticlesHandle->end(); ++it_p) {
+      gen_eta_.push_back(it_p->eta());
+      gen_phi_.push_back(it_p->phi());
+      gen_pt_.push_back(it_p->pt());
+      gen_energy_.push_back(it_p->energy());
+      gen_charge_.push_back(it_p->charge());
+      gen_pdgid_.push_back(it_p->pdgId());
+      gen_status_.push_back(it_p->status());
+
+      std::vector<int> daughters(it_p->daughterRefVector().size(), 0);
+      for (unsigned j = 0; j < it_p->daughterRefVector().size(); ++j) {
+        daughters[j] = static_cast<int>(it_p->daughterRefVector().at(j).key());
+      }
+      gen_daughters_.push_back(daughters);
     }
   }
 
@@ -1582,6 +1732,8 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
 
     // initialize eleID helper
     eIDHelper_->eventInit(iEvent,iSetup);
+    bdtHelper_->eventInit(iEvent,iSetup);
+    bdtHelper_->setElectonIDHelper(eIDHelper_);
     //eIDHelper_->setHitMap(&hitmap_);
     //eIDHelper_->setRecHitTools(&recHitTools_);
 
@@ -1589,6 +1741,16 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
       // filter electrons: endcap only and pt > 5 GeV
       if (ele.isEB()) continue;
       if (ele.pt() < 5) continue;
+
+      // Compute variables using helper functions: https://github.com/CMS-HGCAL/EgammaTools
+      float radius = 3.;
+      eIDHelper_->computeHGCAL(ele,radius,0);
+      //bool good_ele = eIDHelper_->computeHGCAL(ele,radius);
+      bool good_ele=true;
+
+      // Check if computation did not run successfully
+      if (eIDHelper_->sigmaUU() == -1) continue;
+        //if (!good_ele) continue;
 
       auto const &sc = ele.superCluster();
 
@@ -1645,6 +1807,7 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
       ecalDrivenGsfele_seedeta_.push_back(ele.superCluster()->seed()->eta());
       ecalDrivenGsfele_seedphi_.push_back(ele.superCluster()->seed()->phi());
       ecalDrivenGsfele_seedenergy_.push_back(ele.superCluster()->seed()->energy());
+      ecalDrivenGsfele_eleenergy_.push_back(ele.electronCluster()->energy());
       ecalDrivenGsfele_energy_.push_back(ele.energy());
       /*
       ecalDrivenGsfele_energyEE_.push_back(energyEE);
@@ -1683,13 +1846,18 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
 
       ecalDrivenGsfele_track_kfChi2_.push_back((validKF) ? myTrackRef->normalizedChi2() : -1 );
       ecalDrivenGsfele_track_kfNhits_.push_back((validKF) ? myTrackRef->hitPattern().trackerLayersWithMeasurement() : -1);
+      ecalDrivenGsfele_track_gsfNhits_.push_back(ele.gsfTrack()->hitPattern().trackerLayersWithMeasurement());
 
+      /*
       // Compute variables using helper functions: https://github.com/CMS-HGCAL/EgammaTools
       float radius = 3.;
-      eIDHelper_->computeHGCAL(ele,radius);
+      //eIDHelper_->computeHGCAL(ele,radius);
+      bool good_ele = eIDHelper_->computeHGCAL(ele,radius);
 
+      */
       // Check if computation did not run successfully
-      if (eIDHelper_->sigmaUU() == -1) {
+      //if (eIDHelper_->sigmaUU() == -1) {
+      if (!good_ele) {
 	  ecalDrivenGsfele_ele_pcaPosX_.push_back(-1);
 	  ecalDrivenGsfele_ele_pcaPosY_.push_back(-1);
 	  ecalDrivenGsfele_ele_pcaPosZ_.push_back(-1);
@@ -1720,10 +1888,24 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
 	  ecalDrivenGsfele_ele_layEfrac90_.push_back(-1);
 	  ecalDrivenGsfele_ele_outEnergy_.push_back(-1);
 
+	  ecalDrivenGsfele_energyEE_.push_back(-1);
+	  ecalDrivenGsfele_energyFH_.push_back(-1);
+	  ecalDrivenGsfele_energyBH_.push_back(-1);
+
 	  ecalDrivenGsfele_predDepth_.push_back(-1);
 	  ecalDrivenGsfele_realDepth_.push_back(-1);
 	  ecalDrivenGsfele_depthCompat_.push_back(-1);
 	  ecalDrivenGsfele_predDepthSigma_.push_back(-1);
+
+      ecalDrivenGsfele_isoring1_.push_back(-1);
+      ecalDrivenGsfele_isoring2_.push_back(-1);
+      ecalDrivenGsfele_isoring3_.push_back(-1);
+      ecalDrivenGsfele_isoring4_.push_back(-1);
+      ecalDrivenGsfele_isoring5_.push_back(-1);
+      ecalDrivenGsfele_isoring6_.push_back(-1);
+      ecalDrivenGsfele_isoring7_.push_back(-1);
+
+      ecalDrivenGsfele_bdt_.push_back(-1);
       }
       else {
 	  // PCA variables: axis, barycenter, eigenvalues and sigmas
@@ -1794,6 +1976,14 @@ void HGCalAnalysis_EleID::analyze(const edm::Event &iEvent, const edm::EventSetu
 	  ecalDrivenGsfele_realDepth_.push_back(measuredDepth);
 	  ecalDrivenGsfele_depthCompat_.push_back(depthCompatibility);
 
+      ecalDrivenGsfele_isoring1_.push_back(eIDHelper_->getIsolationRing(0));
+      ecalDrivenGsfele_isoring2_.push_back(eIDHelper_->getIsolationRing(1));
+      ecalDrivenGsfele_isoring3_.push_back(eIDHelper_->getIsolationRing(2));
+      ecalDrivenGsfele_isoring4_.push_back(eIDHelper_->getIsolationRing(3));
+      ecalDrivenGsfele_isoring5_.push_back(eIDHelper_->getIsolationRing(4));
+      ecalDrivenGsfele_isoring6_.push_back(eIDHelper_->getIsolationRing(5));
+      ecalDrivenGsfele_isoring7_.push_back(eIDHelper_->getIsolationRing(6));
+      ecalDrivenGsfele_bdt_.push_back(bdtHelper_->computeBDT(ele));
       }
     }  // End of loop over electrons
   }
@@ -2256,6 +2446,11 @@ void HGCalAnalysis_EleID::fillDescriptions(edm::ConfigurationDescriptions &descr
    return Surface::RotationType( xAxis, yAxis, zAxis);
    }
  */
+
+float HGCalAnalysis_EleID::puDensity(float z, int npu, float z0,float sigmaz) const {
+    float x = z-z0;
+    return npu*std::exp(-0.5*x*x/sigmaz/sigmaz)/std::sqrt(2.*TMath::TwoPi())/sigmaz;
+}
 
 // define this as a plug-in
 DEFINE_FWK_MODULE(HGCalAnalysis_EleID);
